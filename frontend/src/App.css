@@ -1,0 +1,14 @@
+.grid-fade {
+  background-image:
+    linear-gradient(rgba(134, 239, 221, 0.045) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(134, 239, 221, 0.045) 1px, transparent 1px);
+  background-size: 34px 34px;
+  mask-image: radial-gradient(ellipse at center, black, transparent 72%);
+}
+
+.scanner-orbit {
+  background:
+    radial-gradient(circle at center, transparent 0 25%, rgba(94, 234, 212, 0.08) 25.5% 26%, transparent 26.5% 42%, rgba(94, 234, 212, 0.05) 42.5% 43%, transparent 43.5%),
+    conic-gradient(from 210deg at 50% 50%, transparent 0deg 270deg, rgba(94, 234, 212, 0.09) 340deg, transparent 360deg);
+  opacity: 0.85;
+}

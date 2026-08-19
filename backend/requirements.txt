@@ -6,3 +6,7 @@ pyjwt
 python-dotenv
 pymongo
 marshmallow
+scikit-learn
+joblib
+pandas
+pyarrow

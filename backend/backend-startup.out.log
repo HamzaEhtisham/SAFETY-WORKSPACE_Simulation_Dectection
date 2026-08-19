@@ -1,0 +1,9 @@
+============================================================
+Checking environment variables...
+MONGO_URI loaded
+SECRET_KEY loaded
+============================================================
+MongoDB connection failed: The resolution lifetime expired after 20.000 seconds: Server 192.168.31.88 UDP port 53 answered The DNS operation timed out.; Server 172.16.10.4 UDP port 53 answered The DNS operation timed out.; Server 172.16.10.5 UDP port 53 answered The DNS operation timed out.; Server 192.168.10.1 UDP port 53 answered The DNS operation timed out.; Server 192.168.31.88 UDP port 53 answered The DNS operation timed out.; Server 172.16.10.4 UDP port 53 answered The DNS operation timed out.; Server 172.16.10.5 UDP port 53 answered The DNS operation timed out.; Server 192.168.10.1 UDP port 53 answered The DNS operation timed out.; Server 192.168.31.88 UDP port 53 answered The DNS operation timed out.; Server 172.16.10.4 UDP port 53 answered The DNS operation timed out.
+Starting detector without MongoDB. Login and cloud feedback storage are unavailable until it reconnects.
+ * Serving Flask app 'main'
+ * Debug mode: on

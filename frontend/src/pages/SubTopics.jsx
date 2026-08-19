@@ -1,52 +1,21 @@
-import React from 'react';
-import { useParams, Link } from 'react-router-dom';
-import { topicsData } from '../data/topicsData';
-import { BookOpen } from 'lucide-react';
+import React from "react";
+import { useParams, Link } from "react-router-dom";
+import { topicsData } from "../data/topicsData";
+import { ArrowLeft, ArrowRight, BookOpen, Play } from "lucide-react";
 
 const SubTopics = () => {
   const { topicId } = useParams();
-  const topic = topicsData.find((t) => t.id === parseInt(topicId));
+  const topic = topicsData.find((item) => item.id === Number(topicId));
+  if (!topic) return <div className="min-h-[calc(100vh-80px)] flex items-center justify-center text-teal-50">Topic not found.</div>;
 
-  if (!topic) {
-    return <div className="min-h-screen bg-slate-900 text-slate-100 flex items-center justify-center">Topic not found.</div>;
-  }
-
-  return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-indigo-900 to-slate-800 text-slate-100 flex items-center justify-center p-6">
-      <div className="max-w-5xl w-full bg-slate-800/60 backdrop-blur-md rounded-2xl shadow-2xl p-8">
-        <header className="mb-8">
-          <h1 className="text-3xl sm:text-4xl font-extrabold tracking-tight">
-            {topic.title} — Subtopics
-          </h1>
-          <p className="mt-1 text-slate-300">
-            Select a subtopic to start its simulation.
-          </p>
-        </header>
-        <main className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {topic.subtopics.map((subtopic) => (
-            <section key={subtopic.id} className="rounded-xl bg-gradient-to-b from-slate-700/40 to-slate-700/20 p-6 flex flex-col justify-between border border-slate-700/40">
-              <div className="flex items-start gap-4">
-                <div className="p-3 rounded-lg bg-slate-900/40">
-                  <BookOpen size={36} />
-                </div>
-                <div>
-                  <h2 className="text-xl font-semibold">{subtopic.title}</h2>
-                </div>
-              </div>
-              <div className="mt-6 flex items-center justify-end">
-                <Link
-                  to={`/simulator/${topic.id}/${subtopic.id}`}
-                  className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 transition font-medium"
-                >
-                  Start Simulation
-                </Link>
-              </div>
-            </section>
-          ))}
-        </main>
-      </div>
+  return <main className="relative min-h-[calc(100vh-80px)] overflow-hidden px-4 pb-12 pt-4 sm:px-6 lg:px-8">
+    <div className="pointer-events-none absolute inset-0 grid-fade opacity-60" />
+    <div className="relative mx-auto max-w-7xl">
+      <Link to="/topics" className="inline-flex items-center gap-2 text-sm font-bold text-teal-100/60 transition hover:text-teal-100"><ArrowLeft size={17} /> All learning modules</Link>
+      <header className="py-8 sm:py-10"><span className="inline-flex rounded-full border border-teal-100/15 bg-teal-300/10 px-3 py-1.5 text-xs font-bold uppercase tracking-[0.18em] text-teal-100">Scenario collection</span><h1 className="mt-5 max-w-3xl text-4xl font-black tracking-tight text-white sm:text-5xl">{topic.title}</h1><p className="mt-4 text-base text-teal-50/65">Select a scenario to open its guided lesson and assessment.</p></header>
+      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">{topic.subtopics.map((subtopic) => <article key={subtopic.id} className="group flex min-h-52 flex-col rounded-3xl border border-white/8 bg-[#0b2929]/75 p-6 transition hover:-translate-y-1 hover:border-teal-200/25 hover:bg-[#0e3131]"><span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-teal-300 text-[#062122]"><BookOpen size={21} /></span><h2 className="mt-6 text-xl font-extrabold leading-7 text-white">{subtopic.title}</h2><div className="mt-auto pt-6"><Link to={`/simulator/${topic.id}/${subtopic.id}`} className="inline-flex items-center gap-2 text-sm font-bold text-teal-200 transition hover:text-teal-100">Start lesson <Play size={15} /><ArrowRight size={15} className="transition group-hover:translate-x-1" /></Link></div></article>)}</section>
     </div>
-  );
+  </main>;
 };
 
 export default SubTopics;

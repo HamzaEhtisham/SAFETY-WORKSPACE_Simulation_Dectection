@@ -1,10 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
-import {
-  MessageSquare,
-  ChevronLeft,
-  ChevronRight,
-} from "lucide-react";
+import { MessageSquare, ChevronLeft, ChevronRight } from "lucide-react";
 import QuizModal from "../components/quiz";
 import { topicsData } from "../data/topicsData";
 import {
@@ -159,7 +155,7 @@ function Chatbot() {
   );
 }
 
-export default function PhishingSimulator({ sidebarOpen, setSidebarOpen }) {
+export default function PhishingSimulator({ sidebarOpen }) {
   const { topicId, subTopicId } = useParams();
   const [currentTopic, setCurrentTopic] = useState(null);
   const [quizTopics, setQuizTopics] = useState([]);
@@ -176,7 +172,7 @@ export default function PhishingSimulator({ sidebarOpen, setSidebarOpen }) {
       topic = mainTopic?.subtopics.find((st) => st.id === subTopicId);
 
       const category = phishingAttackCategories.find(
-        (c) => c.title === mainTopic.title
+        (c) => c.title === mainTopic.title,
       );
       quizData = category?.subtopics.find((st) => st.name === topic.title);
     } else {
@@ -271,8 +267,8 @@ export default function PhishingSimulator({ sidebarOpen, setSidebarOpen }) {
         prev.map((t) =>
           t.id === activeQuizTopic.id
             ? { ...t, attempted: true, score: `${score}/10` }
-            : t
-        )
+            : t,
+        ),
       );
       setResult({ topic: activeQuizTopic.title, score: `${score}/10` });
       setActiveQuizTopic(null);
