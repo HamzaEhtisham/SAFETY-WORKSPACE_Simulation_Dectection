@@ -13,6 +13,11 @@ import re
 from pathlib import Path
 from urllib.parse import urlparse
 
+import pandas as pd
+from reputation import lookup_url
+from ollama_review import review_disagreement
+from verified_feedback import queue_verified_label
+
 try:
     import joblib
 except ImportError:  # The API remains usable until optional ML dependencies are installed.
@@ -20,6 +25,8 @@ except ImportError:  # The API remains usable until optional ML dependencies are
 
 
 ARTIFACT_DIR = Path(__file__).parent / "model_artifacts"
+_MODEL_CACHE = None
+_MODEL_CACHE_MTIME = None
 SUSPICIOUS_TLDS = {"click", "country", "gq", "link", "live", "monster", "rest", "top", "work", "zip"}
 SUSPICIOUS_WORDS = {"account", "bank", "confirm", "invoice", "login", "password", "recovery", "secure", "signin", "update", "verify", "wallet"}
 FEATURE_NAMES = (
@@ -32,6 +39,26 @@ RUNTIME_FEATURE_NAMES = (
     "nb_qm", "nb_and", "nb_or", "nb_eq", "nb_underscore", "nb_percent",
     "nb_slash", "nb_www", "nb_com", "nb_dslash", "http_in_path", "https_token",
     "ratio_digits_url", "ratio_digits_host", "punycode", "port",
+)
+CSV_FEATURE_NAMES = (
+    "url_length", "valid_url", "at_symbol", "sensitive_words_count", "path_length",
+    "isHttps", "nb_dots", "nb_hyphens", "nb_and", "nb_or", "nb_www", "nb_com",
+    "nb_underscore",
+)
+UNIFIED_FEATURE_NAMES = (
+    "length_url", "nb_at", "nb_dots", "nb_hyphens", "nb_and", "nb_or",
+    "nb_www", "nb_com", "nb_underscore",
+)
+KAGGLE_FEATURE_NAMES = (
+    "url_length", "at_count", "question_count", "hyphen_count", "equals_count", "dot_count",
+    "hash_count", "percent_count", "plus_count", "dollar_count", "bang_count", "star_count",
+    "comma_count", "double_slash_count", "uses_https", "digit_count", "letter_count",
+    "shortening_service", "ip_address", "suspicious_word_count",
+)
+SHORTENING_SERVICES = re.compile(
+    r"bit\.ly|goo\.gl|shorte\.st|go2l\.ink|x\.co|ow\.ly|t\.co|tinyurl|tr\.im|is\.gd|"
+    r"tiny\.cc|bit\.do|lnkd\.in|db\.tt|adf\.ly|po\.st|j\.mp|cutt\.us|v\.gd|qr\.net",
+    re.I,
 )
 
 
@@ -100,6 +127,42 @@ def runtime_features(value: str) -> list[float]:
     ]
 
 
+def csv_runtime_features(value: str) -> list[float]:
+    """Recreate the features used by the supplementary CSV URL dataset."""
+    url = normalise_url(value)
+    parsed = urlparse(url)
+    text = f"{(parsed.hostname or '').lower()}{parsed.path.lower()}?{parsed.query.lower()}"
+    return [
+        len(url), 1.0, float("@" in url),
+        float(sum(word in text for word in SUSPICIOUS_WORDS)), len(parsed.path),
+        float(parsed.scheme == "https"), url.count("."), url.count("-"), url.count("&"),
+        url.count("|"), url.lower().count("www"), url.lower().count(".com"), url.count("_"),
+    ]
+
+
+def unified_runtime_features(value: str) -> list[float]:
+    """Features shared by both supplied phishing datasets."""
+    features = runtime_features(value)
+    return [features[index] for index in (0, 5, 3, 4, 7, 8, 13, 14, 10)]
+
+
+def kaggle_runtime_features(value: str) -> list[float]:
+    """Static URL signals based on the pulled Kaggle notebook's feature set."""
+    url = normalise_url(value)
+    parsed = urlparse(url)
+    hostname = (parsed.hostname or "").lower()
+    text = f"{hostname}{parsed.path.lower()}?{parsed.query.lower()}"
+    is_ip = bool(re.fullmatch(r"(?:\d{1,3}\.){3}\d{1,3}", hostname))
+    return [
+        len(url), url.count("@"), url.count("?"), url.count("-"), url.count("="), url.count("."),
+        url.count("#"), url.count("%"), url.count("+"), url.count("$"), url.count("!"), url.count("*"),
+        url.count(","), url.replace("https://", "", 1).replace("http://", "", 1).count("//"),
+        float(parsed.scheme == "https"), sum(char.isdigit() for char in url), sum(char.isalpha() for char in url),
+        float(bool(SHORTENING_SERVICES.search(hostname))), float(is_ip),
+        float(sum(word in text for word in SUSPICIOUS_WORDS)),
+    ]
+
+
 def _fallback_probability(features: list[float]) -> float:
     # Conservative fallback used only until train_models.py has produced artifacts.
     weights = [1.1, 1.5, 1.6, 1.2, .7, .4, .7, .5, .8, 1.0, 1.1, .2, .4]
@@ -113,50 +176,99 @@ def _predict_artifact(filename: str, features: list[float]) -> float | None:
     file_path = ARTIFACT_DIR / filename
     if not file_path.exists():
         return None
-    model = joblib.load(file_path)
-    return float(model.predict_proba([features])[0][1])
+    model = _load_model(file_path)
+    if isinstance(model, dict):
+        return float(sum(_predict_probability(item, features) for item in model.values()) / len(model))
+    return _predict_probability(model, features)
+
+
+def _load_model(file_path: Path):
+    """Load the large ensemble once and reload only after a new training artifact is saved."""
+    global _MODEL_CACHE, _MODEL_CACHE_MTIME
+    modified = file_path.stat().st_mtime_ns
+    if _MODEL_CACHE is None or _MODEL_CACHE_MTIME != modified:
+        _MODEL_CACHE = joblib.load(file_path)
+        _MODEL_CACHE_MTIME = modified
+    return _MODEL_CACHE
+
+
+def warm_model_cache() -> bool:
+    """Load trained artifacts during backend startup instead of the first user scan."""
+    if not joblib:
+        return False
+    file_path = ARTIFACT_DIR / "url_ml.joblib"
+    if not file_path.exists():
+        return False
+    _load_model(file_path)
+    return True
+
+
+def _predict_probability(model, features: list[float]) -> float:
+    """Preserve training feature names so scikit-learn can validate inference input."""
+    feature_names = getattr(model, "feature_names_in_", None)
+    model_input = pd.DataFrame([features], columns=feature_names) if feature_names is not None else [features]
+    return float(model.predict_proba(model_input)[0][1])
+
+
+def _ensemble_risks(features: list[float]) -> dict[str, int] | None:
+    if not joblib:
+        return None
+    file_path = ARTIFACT_DIR / "url_ml.joblib"
+    if not file_path.exists():
+        return None
+    model = _load_model(file_path)
+    if not isinstance(model, dict):
+        return None
+    return {name: round(_predict_probability(item, features) * 100) for name, item in model.items()}
 
 
 def analyse_url(value: str) -> dict:
     url, hostname, features, findings = extract_features(value)
-    url_features = runtime_features(value)
-    ml = _predict_artifact("url_ml.joblib", url_features) or _predict_artifact("ml_logistic.joblib", features)
-    dl = _predict_artifact("url_dl.joblib", url_features) or _predict_artifact("dl_mlp.joblib", features)
+    kaggle_features = kaggle_runtime_features(value)
+    unified = _predict_artifact("url_ml.joblib", kaggle_features) or _predict_artifact("ml_logistic.joblib", features)
+    ensemble_risks = _ensemble_risks(kaggle_features)
     fallback = _fallback_probability(features)
-    ml = fallback if ml is None else ml
-    dl = fallback if dl is None else dl
-
-    # A trained tabular Q-policy selects the operational action for risk bands.
-    # If not trained yet, this uses calibrated Q-values rather than overriding model evidence.
-    risk_state = min(4, int(((ml + dl) / 2) * 5))
-    q_policy = {0: [0.92, 0.08, 0.01], 1: [0.72, 0.34, 0.05], 2: [0.30, 0.76, 0.25], 3: [0.08, 0.61, 0.94], 4: [0.01, 0.38, 0.99]}
-    policy_file = ARTIFACT_DIR / "rl_q_policy.json"
-    if policy_file.exists():
-        with policy_file.open(encoding="utf-8") as policy_data:
-            q_policy = {int(state): values for state, values in json.load(policy_data).items()}
-    actions = ("allow", "review", "block")
-    q_values = q_policy[risk_state]
-    action = actions[q_values.index(max(q_values))]
-    rl_probability = {"allow": 0.10, "review": 0.55, "block": 0.94}[action]
-    probability = 0.45 * ml + 0.45 * dl + 0.10 * rl_probability
+    ml_probability = fallback if unified is None else unified
+    probability = ml_probability
+    reputation = lookup_url(url)
+    llm_review = None
+    if reputation["known_threat"]:
+        ml_risk = round(ml_probability * 100)
+        # A source-confirmed reputation verdict is safe training evidence; the LLM only explains the disagreement.
+        if ml_risk < 65:
+            queue_verified_label(url, 1, reputation["sources"], ml_risk)
+            llm_review = review_disagreement(url, ml_risk, json.dumps(reputation, sort_keys=True))
+        probability = max(probability, 0.99)
+        findings.append({"label": "Known malicious URL", "detail": "A configured threat-intelligence source reported this URL."})
+    elif reputation.get("domain_age_days") is not None and reputation["domain_age_days"] < 30:
+        probability = min(1.0, probability + 0.06)
+        findings.append({"label": "Newly registered domain", "detail": f"Domain age is about {reputation['domain_age_days']} days."})
+    elif reputation.get("dns_resolves") is False:
+        probability = min(1.0, probability + 0.04)
+        findings.append({"label": "Domain did not resolve", "detail": "DNS lookup failed when this scan ran."})
     score = round(probability * 100)
     level = "High risk" if score >= 65 else "Use caution" if score >= 35 else "Low risk"
-    trained = (ARTIFACT_DIR / "url_ml.joblib").exists() and (ARTIFACT_DIR / "url_dl.joblib").exists()
+    trained = (ARTIFACT_DIR / "url_ml.joblib").exists()
 
     return {
         "url": url, "hostname": hostname, "score": score, "level": level,
         "summary": "Avoid opening this link or entering credentials until you verify it independently." if score >= 65 else "Verify the sender and use an official bookmark before sharing credentials." if score >= 35 else "No major indicators were found. A low score is not a safety guarantee.",
         "findings": findings,
         "models": {
-            "ml": {"name": "Logistic Regression", "risk": round(ml * 100)},
-            "dl": {"name": "MLP Neural Network", "risk": round(dl * 100)},
-            "rl": {"name": "Q-policy", "action": action, "risk": round(rl_probability * 100)},
+            "decision_tree": {"name": "Decision Tree Classifier", "risk": ensemble_risks["Decision Tree"]} if ensemble_risks else None,
+            "random_forest": {"name": "Random Forest Classifier", "risk": ensemble_risks["Random Forest"]} if ensemble_risks else None,
+            "extra_trees": {"name": "Extra Trees Classifier", "risk": ensemble_risks["Extra Trees"]} if ensemble_risks else None,
+            "ml": {"name": "Three-Model Ensemble", "risk": round(probability * 100)},
         },
+        "reputation": reputation,
+        "llm_review": llm_review,
         "model_status": "trained" if trained else "fallback_pending_training",
     }
 
 
 def learn_from_feedback(value: str, label: int) -> bool:
+    """Online updates are disabled; retrain the single model with verified data."""
+    return False
     """Apply one trusted, labelled feedback item to the DL and RL online models."""
     if label not in (0, 1) or not joblib:
         return False

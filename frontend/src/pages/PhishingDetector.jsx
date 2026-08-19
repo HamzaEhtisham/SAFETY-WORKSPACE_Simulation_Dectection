@@ -74,7 +74,6 @@ const PhishingDetector = () => {
   const [copied, setCopied] = useState(false);
   const [isScanning, setIsScanning] = useState(false);
   const [scanError, setScanError] = useState("");
-  const [feedbackStatus, setFeedbackStatus] = useState("");
 
   const statusStyles = useMemo(() => {
     if (!result || result.invalid) return null;
@@ -98,7 +97,6 @@ const PhishingDetector = () => {
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Detection request failed.");
       setResult(data);
-      setFeedbackStatus("");
     } catch (error) {
       // Keep the page useful when the local API has not been started yet.
       const localResult = scanLink(value);
@@ -106,24 +104,6 @@ const PhishingDetector = () => {
       setScanError(`${error.message} Showing the browser fallback result.`);
     } finally {
       setIsScanning(false);
-    }
-  };
-
-  const submitFeedback = async (label) => {
-    if (!result?.url) return;
-    setFeedbackStatus("Saving feedback...");
-    try {
-      const apiBase = import.meta.env.VITE_API_URL || "/api";
-      const response = await fetch(`${apiBase}/detect/feedback`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${localStorage.getItem("token")}` },
-        body: JSON.stringify({ url: result.url, label }),
-      });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || "Could not save feedback.");
-      setFeedbackStatus("Thanks — your feedback was saved and the online model was updated.");
-    } catch (error) {
-      setFeedbackStatus(error.message);
     }
   };
 
@@ -276,17 +256,30 @@ const PhishingDetector = () => {
                   </div>
                 )}
 
-                {result.models && (
-                  <div className="mt-5 rounded-xl border border-white/8 bg-white/[0.025] p-3.5">
-                    <p className="text-sm font-bold text-teal-50">Help improve future scans</p>
-                    <p className="mt-1 text-xs leading-5 text-teal-50/55">Only mark a URL if you know its real outcome. Your feedback updates the online model immediately.</p>
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      <button onClick={() => submitFeedback(0)} className="rounded-lg border border-teal-200/20 px-3 py-2 text-xs font-bold text-teal-100 transition hover:bg-teal-300/10">Actually safe</button>
-                      <button onClick={() => submitFeedback(1)} className="rounded-lg border border-rose-200/20 px-3 py-2 text-xs font-bold text-rose-100 transition hover:bg-rose-300/10">Actually phishing</button>
+                {result.reputation?.enabled && (
+                  <div className="mt-5 rounded-xl border border-cyan-200/15 bg-cyan-300/[0.04] p-3.5">
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="text-xs font-bold uppercase tracking-[0.16em] text-cyan-100">Live reputation</p>
+                      <span className={result.reputation.known_threat ? "text-xs font-bold text-rose-200" : "text-xs font-bold text-teal-200"}>
+                        {result.reputation.known_threat ? "Known threat found" : "No known threat found"}
+                      </span>
                     </div>
-                    {feedbackStatus && <p className="mt-2 text-xs text-amber-100">{feedbackStatus}</p>}
+                    <div className="mt-3 grid gap-2 sm:grid-cols-3">
+                      <div className="rounded-lg border border-white/7 bg-black/10 p-2.5"><p className="text-[11px] font-bold text-teal-50/60">Threat sources</p><p className="mt-1 text-sm font-bold text-teal-50">{result.reputation.sources?.join(", ") || "No API response"}</p></div>
+                      <div className="rounded-lg border border-white/7 bg-black/10 p-2.5"><p className="text-[11px] font-bold text-teal-50/60">VirusTotal</p><p className="mt-1 text-sm font-bold text-teal-50">{result.reputation.virustotal ? `${result.reputation.virustotal.malicious} malicious, ${result.reputation.virustotal.suspicious} suspicious` : "Not available"}</p></div>
+                      <div className="rounded-lg border border-white/7 bg-black/10 p-2.5"><p className="text-[11px] font-bold text-teal-50/60">Domain intelligence</p><p className="mt-1 text-sm font-bold text-teal-50">{result.reputation.domain_age_days !== null ? `${result.reputation.domain_age_days} days old` : result.reputation.dns_resolves === false ? "DNS did not resolve" : result.reputation.dns_resolves ? "DNS resolved" : "Not available"}</p></div>
+                    </div>
                   </div>
                 )}
+
+                {result.llm_review && (
+                  <div className="mt-5 rounded-xl border border-violet-200/15 bg-violet-300/[0.04] p-3.5">
+                    <div className="flex items-center justify-between gap-3"><p className="text-xs font-bold uppercase tracking-[0.16em] text-violet-100">Local AI review</p><span className="text-xs font-bold text-violet-200">{result.llm_review.model || "Ollama unavailable"}</span></div>
+                    <p className="mt-2 text-sm leading-6 text-teal-50/75">{result.llm_review.summary || result.llm_review.error}</p>
+                    <p className="mt-2 text-[11px] text-teal-50/40">The reputation verdict is queued as verified feedback for controlled batch retraining; the local LLM does not change the model directly.</p>
+                  </div>
+                )}
+
               </div>
             )}
 

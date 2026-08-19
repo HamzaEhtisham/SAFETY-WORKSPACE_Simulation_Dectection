@@ -12,7 +12,7 @@ import json
 from pathlib import Path
 
 from models import UserSchema, QuizAttemptSchema
-from detector import analyse_url, learn_from_feedback
+from detector import analyse_url, learn_from_feedback, warm_model_cache
 
 # Load environment variables first
 load_dotenv()
@@ -328,4 +328,6 @@ def delete_user(username):
 
 if __name__ == "__main__":
     # Avoid Windows watchdog spawning a detached child when launched from the IDE/background.
+    print("Loading URL detection models...")
+    warm_model_cache()
     app.run(debug=True, use_reloader=False)
