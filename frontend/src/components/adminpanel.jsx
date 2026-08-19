@@ -20,19 +20,16 @@ const AdminPanel = () => {
       }
 
       try {
-        const usersResponse = await axios.get(
-          "http://127.0.0.1:5000/admin/users",
-          {
-            headers: { Authorization: `Bearer ${token}` },
-          }
-        );
+        const usersResponse = await axios.get("/api/admin/users", {
+          headers: { Authorization: `Bearer ${token}` },
+        });
         setUsers(usersResponse.data);
 
         const quizAttemptsResponse = await axios.get(
-          "http://127.0.0.1:5000/admin/quiz_attempts",
+          "/api/admin/quiz_attempts",
           {
             headers: { Authorization: `Bearer ${token}` },
-          }
+          },
         );
         setQuizAttempts(quizAttemptsResponse.data);
       } catch (err) {
@@ -60,12 +57,12 @@ const AdminPanel = () => {
     }
 
     try {
-      await axios.delete(`http://127.0.0.1:5000/admin/users/${username}`, {
+      await axios.delete(`/api/admin/users/${username}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       setUsers(users.filter((user) => user.username !== username));
       setQuizAttempts(
-        quizAttempts.filter((attempt) => attempt.username !== username)
+        quizAttempts.filter((attempt) => attempt.username !== username),
       );
     } catch (err) {
       console.error("Failed to delete user", err);
@@ -76,7 +73,7 @@ const AdminPanel = () => {
   const generateReport = (user) => {
     const doc = new jsPDF();
     const userQuizAttempts = quizAttempts.filter(
-      (attempt) => attempt.username === user.username
+      (attempt) => attempt.username === user.username,
     );
 
     doc.text(`Progress Report for ${user.username}`, 14, 16);
@@ -144,7 +141,7 @@ const AdminPanel = () => {
                       Quiz Attempts
                     </h4>
                     {quizAttempts.filter(
-                      (attempt) => attempt.username === user.username
+                      (attempt) => attempt.username === user.username,
                     ).length === 0 ? (
                       <p className="text-slate-400">
                         No quiz attempts found for this user.
@@ -153,7 +150,7 @@ const AdminPanel = () => {
                       <ul className="list-disc list-inside">
                         {quizAttempts
                           .filter(
-                            (attempt) => attempt.username === user.username
+                            (attempt) => attempt.username === user.username,
                           )
                           .map((attempt, idx) => (
                             <li key={idx} className="text-slate-300">

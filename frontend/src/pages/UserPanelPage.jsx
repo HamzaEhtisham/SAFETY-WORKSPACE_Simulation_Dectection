@@ -22,21 +22,18 @@ export default function UserPanelPage() {
         const allAvailableTopics = topicsData;
 
         // Fetch user progress
-        const progressResponse = await fetch(
-          "http://127.0.0.1:5000/user_progress",
-          {
-            headers: {
-              Authorization: `Bearer ${token}`,
-            },
-          }
-        );
+        const progressResponse = await fetch("/api/user_progress", {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        });
 
         if (!progressResponse.ok) {
           if (progressResponse.status === 401) {
             navigate("/login");
           }
           throw new Error(
-            `HTTP error! status: ${progressResponse.status} from /user_progress`
+            `HTTP error! status: ${progressResponse.status} from /user_progress`,
           );
         }
         const userProgress = await progressResponse.json();

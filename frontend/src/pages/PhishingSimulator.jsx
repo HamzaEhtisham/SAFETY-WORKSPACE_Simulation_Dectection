@@ -32,32 +32,33 @@ function Chatbot() {
     if (!input.trim() || loading) return;
 
     const userMsg = { from: "user", text: input.trim() };
-    setMessages((m) => [...m, userMsg]);
-    const userInput = input.trim();
+    const conversation = [...messages, userMsg];
+    setMessages(conversation);
     setInput("");
     setLoading(true);
 
     try {
-      const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      const token = localStorage.getItem("token");
+      const res = await fetch("/api/chatbot", {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${import.meta.env.VITE_CHATBOT_API_KEY}`,
           "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
-          model: "gpt-3.5-turbo",
-          messages: [
-            {
-              role: "system",
-              content:
-                "You are a friendly chatbot that explains phishing and online safety clearly and concisely.",
-            },
-            { role: "user", content: userInput },
-          ],
+          messages: conversation.map((message) => ({
+            role: message.from === "bot" ? "assistant" : "user",
+            content: message.text,
+          })),
         }),
       });
 
       const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data?.error || "Unable to reach the local model.");
+      }
+      // Keep the existing message renderer independent of the provider response shape.
+      data.choices = [{ message: { content: data.answer || "Sorry, the local model returned no response." } }];
       const botReply =
         data?.choices?.[0]?.message?.content ||
         "⚠️ Sorry, I couldn't get a response.";
@@ -100,7 +101,7 @@ function Chatbot() {
 
       <div
         ref={listRef}
-        className="chatbot-messages flex-1 p-4 space-y-3 min-h-0"
+            className="chatbot-messages flex-1 min-h-0 space-y-3 bg-[#082324] p-4"
         style={{
           overflowY: "scroll",
           scrollbarWidth: "thin",
@@ -117,8 +118,8 @@ function Chatbot() {
             <div
               className={`inline-block px-3 py-2 rounded-lg text-sm ${
                 m.from === "bot"
-                  ? "bg-slate-700 text-slate-100"
-                  : "bg-indigo-600 text-white"
+                  ? "bg-[#1c4043] text-slate-100"
+                  : "bg-teal-300 text-[#062122]"
               }`}
             >
               {m.text}
@@ -139,13 +140,13 @@ function Chatbot() {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && sendMessage()}
-            className="flex-1 px-3 py-2 rounded-lg bg-slate-900/50 border border-slate-700 text-white focus:outline-none"
+            className="flex-1 rounded-lg border border-teal-100/15 bg-[#071c1d] px-3 py-2 text-white focus:outline-none focus:border-teal-300/60"
             placeholder="Ask the chatbot..."
           />
           <button
             onClick={sendMessage}
             disabled={loading}
-            className="px-3 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white transition disabled:opacity-50"
+            className="rounded-lg bg-teal-300 px-3 py-2 font-semibold text-[#062122] transition hover:bg-teal-200 disabled:opacity-50"
           >
             {loading ? "..." : "Send"}
           </button>
@@ -202,31 +203,32 @@ export default function PhishingSimulator({ sidebarOpen }) {
     const renderPdfToImages = async () => {
       if (currentTopic && currentTopic.slidePath) {
         setIsLoadingPdf(true);
-        const pdf = await pdfjsLib.getDocument(currentTopic.slidePath).promise;
-        const images = [];
-        for (let i = 1; i <= pdf.numPages; i++) {
-          const page = await pdf.getPage(i);
-          const viewport = page.getViewport({ scale: 1.5 });
-          const canvas = document.createElement("canvas");
-          const context = canvas.getContext("2d");
-          canvas.height = viewport.height;
-          canvas.width = viewport.width;
-          await page.render({ canvasContext: context, viewport: viewport })
-            .promise;
-          images.push(canvas.toDataURL());
+        try {
+          setPageImages([]);
+          setPageNumber(1);
+          const pdf = await pdfjsLib.getDocument(currentTopic.slidePath).promise;
+          const images = [];
+          for (let i = 1; i <= pdf.numPages; i++) {
+            const page = await pdf.getPage(i);
+            const viewport = page.getViewport({ scale: 1.5 });
+            const canvas = document.createElement("canvas");
+            const context = canvas.getContext("2d");
+            canvas.height = viewport.height;
+            canvas.width = viewport.width;
+            await page.render({ canvasContext: context, viewport }).promise;
+            images.push(canvas.toDataURL());
+          }
+          setPageImages(images);
+        } catch (error) {
+          console.error("Unable to load lesson slides:", error);
+          setPageImages([]);
+        } finally {
+          setIsLoadingPdf(false);
         }
-        setPageImages(images);
-        setIsLoadingPdf(false);
       }
     };
     renderPdfToImages();
   }, [currentTopic]);
-
-  const handleLogout = () => {
-    localStorage.removeItem("token");
-    localStorage.removeItem("user");
-    window.location.href = "/login";
-  };
 
   const [activeQuizTopic, setActiveQuizTopic] = useState(null);
   const [result, setResult] = useState(null);
@@ -244,7 +246,7 @@ export default function PhishingSimulator({ sidebarOpen }) {
     }
 
     try {
-      const response = await fetch("http://127.0.0.1:5000/save_quiz_attempt", {
+      const response = await fetch("/api/save_quiz_attempt", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -282,36 +284,37 @@ export default function PhishingSimulator({ sidebarOpen }) {
   }
 
   return (
-    <div className="p-6 relative">
+    <main className="relative px-4 pb-10 pt-3 sm:px-6 lg:px-8">
       <div
-        className={`max-w-7xl mx-auto grid transition-all duration-500 ${
-          sidebarOpen ? "lg:grid-cols-[1fr_360px]" : "lg:grid-cols-[1fr_0px]"
-        } gap-6`}
+        className={`mx-auto grid max-w-7xl items-start gap-5 lg:gap-6 ${
+          sidebarOpen ? "lg:grid-cols-[minmax(0,1fr)_minmax(320px,360px)]" : "grid-cols-1"
+        }`}
       >
         {/* MAIN PANEL */}
         <div className="flex flex-col gap-4">
           {/* Slides */}
-          <div
-            className="bg-slate-800/40 rounded-2xl p-6 shadow-lg flex-col"
-            style={{ display: "flex", height: "100%" }}
-          >
-            <div className="flex items-center justify-between mb-4">
-              <h1 className="text-2xl font-bold">{currentTopic.title}</h1>
+          <section className="flex min-w-0 flex-col overflow-hidden rounded-2xl border border-teal-100/10 bg-[#0b2929]/85 p-4 shadow-lg sm:p-6">
+            <div className="mb-4 flex items-center justify-between gap-4">
+              <h1 className="text-xl font-bold text-white sm:text-2xl">{currentTopic.title}</h1>
             </div>
 
             {currentTopic.slidePath ? (
               <div className="flex-1">
                 {isLoadingPdf ? (
-                  <div>Loading PDF...</div>
+                  <div className="flex min-h-80 items-center justify-center text-slate-400">Loading slides...</div>
                 ) : (
                   <>
                     {pageImages.length > 0 && (
-                      <img
-                        src={pageImages[pageNumber - 1]}
-                        alt={`Page ${pageNumber}`}
-                      />
+                      <div className="overflow-hidden rounded-xl bg-white shadow-inner">
+                        <img
+                          src={pageImages[pageNumber - 1]}
+                          alt={`Page ${pageNumber} of ${pageImages.length}`}
+                          className="block h-auto w-full"
+                        />
+                      </div>
                     )}
-                    <div className="flex justify-center items-center mt-4">
+                    {pageImages.length === 0 && <div className="flex min-h-80 items-center justify-center text-slate-400">Slides could not be loaded.</div>}
+                    <div className="mt-4 flex items-center justify-center gap-3">
                       <button
                         onClick={() => setPageNumber(pageNumber - 1)}
                         disabled={pageNumber <= 1}
@@ -319,7 +322,7 @@ export default function PhishingSimulator({ sidebarOpen }) {
                       >
                         <ChevronLeft size={18} />
                       </button>
-                      <p className="mx-4">
+                      <p className="min-w-28 text-center text-sm text-slate-200 sm:text-base">
                         Page {pageNumber} of {pageImages.length}
                       </p>
                       <button
@@ -338,10 +341,10 @@ export default function PhishingSimulator({ sidebarOpen }) {
                 <p>No slides available for this topic.</p>
               </div>
             )}
-          </div>
+          </section>
 
           {/* Quizzes */}
-          <div className="bg-slate-800/30 rounded-2xl p-4 shadow-inner">
+          <section className="rounded-2xl border border-teal-100/10 bg-[#0b2929]/75 p-4 shadow-inner sm:p-5">
             <div className="flex items-center justify-between mb-3">
               <h3 className="text-lg font-semibold">Quiz</h3>
               <div className="text-sm text-slate-400">
@@ -388,35 +391,23 @@ export default function PhishingSimulator({ sidebarOpen }) {
                 Last result: <strong>{result.topic}</strong> — {result.score}
               </div>
             )}
-          </div>
+          </section>
         </div>
 
         {/* Chatbot Sidebar */}
-        <aside
-          className={`bg-slate-800/40 rounded-2xl shadow-lg overflow-hidden flex flex-col transition-all duration-500 h-[calc(100vh-160px)] sticky top-28 ${
-            sidebarOpen ? "opacity-100" : "opacity-0 w-0"
-          }`}
-        >
-          {sidebarOpen && (
-            <>
-              <div className="p-4 border-b border-slate-700 space-y-2 flex-shrink-0">
+        {sidebarOpen && (
+          <aside className="sticky top-24 flex h-[min(680px,calc(100vh-7.5rem))] min-h-[470px] flex-col overflow-hidden rounded-2xl border border-teal-100/10 bg-[#0b2929]/85 shadow-lg">
+              <div className="flex-shrink-0 border-b border-teal-100/10 p-4">
                 <button
                   onClick={() => (window.location.href = "/user-panel")}
-                  className="block w-full text-center py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-semibold transition"
+                  className="block w-full rounded-lg bg-teal-300 py-2 text-center font-semibold text-[#062122] transition hover:bg-teal-200"
                 >
                   View User Panel
                 </button>
-                <button
-                  onClick={handleLogout}
-                  className="block w-full text-center py-2 rounded-lg bg-red-600 hover:bg-red-500 text-white font-semibold transition"
-                >
-                  Logout
-                </button>
               </div>
               <Chatbot />
-            </>
-          )}
-        </aside>
+          </aside>
+        )}
       </div>
 
       {/* Quiz Modal */}
@@ -427,6 +418,6 @@ export default function PhishingSimulator({ sidebarOpen }) {
           onSubmit={handleQuizSubmit}
         />
       )}
-    </div>
+    </main>
   );
 }

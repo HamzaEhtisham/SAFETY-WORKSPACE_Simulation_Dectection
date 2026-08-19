@@ -10,9 +10,11 @@ from marshmallow import ValidationError
 from bson import ObjectId
 import json
 from pathlib import Path
+from urllib.parse import urlsplit, urlunsplit
 
 from models import UserSchema, QuizAttemptSchema
 from detector import analyse_url, learn_from_feedback, warm_model_cache
+from ollama_review import chat_about_cybersecurity
 
 # Load environment variables first
 load_dotenv()
@@ -37,6 +39,12 @@ else:
 print("=" * 60)
 
 # Configure Flask app
+mongo_dbname = os.getenv("MONGO_DBNAME", "safety_workspace")
+if mongo_uri and not urlsplit(mongo_uri).path.strip("/"):
+    parsed_mongo_uri = urlsplit(mongo_uri)
+    mongo_uri = urlunsplit(
+        parsed_mongo_uri._replace(path=f"/{mongo_dbname}")
+    )
 app.config["MONGO_URI"] = mongo_uri
 app.config["SECRET_KEY"] = secret_key
 
@@ -44,7 +52,11 @@ app.config["SECRET_KEY"] = secret_key
 mongo = None
 try:
     mongo = PyMongo(app)
-    mongo.db.command('ping')
+    if mongo.db is None:
+        raise RuntimeError(
+            "MongoDB database is not configured. Set MONGO_DBNAME or include a database in MONGO_URI."
+        )
+    mongo.db.command("ping")
     print("MongoDB connected successfully!")
     print(f"Database: {mongo.db.name}")
 except Exception as e:
@@ -64,9 +76,9 @@ CORS(
 )
 
 # Initialize collections
-users_collection = mongo.db.users if mongo else None
-quiz_attempts_collection = mongo.db.quiz_attempts if mongo else None
-detection_feedback_collection = mongo.db.detection_feedback if mongo else None
+users_collection = mongo.db.users if mongo is not None and mongo.db is not None else None
+quiz_attempts_collection = mongo.db.quiz_attempts if mongo is not None and mongo.db is not None else None
+detection_feedback_collection = mongo.db.detection_feedback if mongo is not None and mongo.db is not None else None
 
 @app.route("/detect", methods=["POST"])
 def detect_url():
@@ -78,6 +90,33 @@ def detect_url():
         return jsonify(analyse_url(url)), 200
     except ValueError as error:
         return jsonify({"error": str(error)}), 400
+
+
+@app.route("/chatbot", methods=["POST"])
+def chatbot():
+    """Proxy simulator questions to the locally running Ollama model."""
+    if not get_current_user():
+        return jsonify({"error": "Unauthorized"}), 401
+
+    data = request.get_json(silent=True) or {}
+    messages = data.get("messages", [])
+    if not isinstance(messages, list) or not messages:
+        return jsonify({"error": "messages are required"}), 400
+
+    clean_messages = []
+    for message in messages[-8:]:
+        if not isinstance(message, dict):
+            continue
+        role, content = message.get("role"), message.get("content")
+        if role in {"user", "assistant"} and isinstance(content, str) and content.strip():
+            clean_messages.append({"role": role, "content": content.strip()[:2000]})
+    if not clean_messages:
+        return jsonify({"error": "A valid message is required"}), 400
+
+    result = chat_about_cybersecurity(clean_messages)
+    if not result["available"]:
+        return jsonify({"error": result["error"]}), 503
+    return jsonify({"answer": result["answer"], "model": result.get("model")}), 200
 
 @app.route("/signup", methods=["POST"])
 def signup():
@@ -255,6 +294,9 @@ def user_progress():
     username = get_current_user()
     if not username:
         return jsonify({"error": "Unauthorized"}), 401
+
+    if quiz_attempts_collection is None:
+        return jsonify([]), 200
 
     attempts = list(quiz_attempts_collection.find({"username": username}, {"_id": 0}))
     schema = QuizAttemptSchema(many=True)
